@@ -116,9 +116,7 @@ class FakeZefixClient:
                 return company
         return None
 
-    async def list_legal_forms(
-        self, *, language: str = "de"
-    ) -> list[LegalForm]:
+    async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]:
         if self.error:
             raise self.error
         return list(self.legal_forms)

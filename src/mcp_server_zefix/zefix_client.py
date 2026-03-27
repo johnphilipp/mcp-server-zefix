@@ -49,9 +49,7 @@ class AbstractZefixClient(Protocol):
         self, chid: str, *, language: str = "en"
     ) -> Company | None: ...
 
-    async def list_legal_forms(
-        self, *, language: str = "de"
-    ) -> list[LegalForm]: ...
+    async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]: ...
 
 
 _DEFAULT_BASE_URL = "https://www.zefix.ch/ZefixREST/api/v1"
@@ -122,12 +120,8 @@ class HttpZefixClient:
     base_url: str = field(
         default_factory=lambda: os.getenv("ZEFIX_BASE_URL", _DEFAULT_BASE_URL)
     )
-    username: str | None = field(
-        default_factory=lambda: os.getenv("ZEFIX_USERNAME")
-    )
-    password: str | None = field(
-        default_factory=lambda: os.getenv("ZEFIX_PASSWORD")
-    )
+    username: str | None = field(default_factory=lambda: os.getenv("ZEFIX_USERNAME"))
+    password: str | None = field(default_factory=lambda: os.getenv("ZEFIX_PASSWORD"))
     _last_request_time: float = field(default=0.0, init=False, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
@@ -166,25 +160,19 @@ class HttpZefixClient:
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
             if status == 404:
-                raise ZefixNotFoundError(
-                    f"Not found: {method} {path}"
-                ) from e
+                raise ZefixNotFoundError(f"Not found: {method} {path}") from e
             raise ZefixAPIError(
                 f"HTTP {status} from Zefix API: {method} {path}",
                 status_code=status,
             ) from e
         except httpx.TimeoutException as e:
-            raise ZefixTimeoutError(
-                f"Request timed out: {method} {path}"
-            ) from e
+            raise ZefixTimeoutError(f"Request timed out: {method} {path}") from e
         except httpx.ConnectError as e:
             raise ZefixConnectionError(
                 f"Cannot connect to Zefix API at {self.base_url}: {e}"
             ) from e
         except httpx.HTTPError as e:
-            raise ZefixError(
-                f"Unexpected Zefix API error: {method} {path}: {e}"
-            ) from e
+            raise ZefixError(f"Unexpected Zefix API error: {method} {path}: {e}") from e
 
     async def search_companies(
         self,
@@ -246,9 +234,7 @@ class HttpZefixClient:
         items = data if isinstance(data, list) else [data]
         return _parse_company(items[0], language) if items else None
 
-    async def list_legal_forms(
-        self, *, language: str = "de"
-    ) -> list[LegalForm]:
+    async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]:
         data = await self._request(
             "GET", "/legalForm", params={"languageKey": language}
         )
