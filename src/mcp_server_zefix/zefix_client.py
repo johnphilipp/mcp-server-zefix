@@ -53,9 +53,18 @@ class AbstractZefixClient(Protocol):
 
 
 _DEFAULT_BASE_URL = "https://www.zefix.ch/ZefixREST/api/v1"
-_USER_AGENT = "mcp-server-zefix/0.1.0"
+_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+)
 _REQUEST_TIMEOUT = 30.0
 _MIN_REQUEST_INTERVAL = 1.0  # seconds
+
+# The unauthenticated API uses German status values
+_STATUS_MAP = {
+    "EXISTIEREND": "ACTIVE",
+    "GELOESCHT": "DELETED",
+}
 
 
 def _parse_legal_form(raw: Any, language: str) -> LegalForm | None:
@@ -75,8 +84,17 @@ def _parse_legal_form(raw: Any, language: str) -> LegalForm | None:
     return LegalForm(id=int(fid), name=name)
 
 
-def _parse_company(raw: dict[str, Any], language: str) -> Company:
-    """Map a raw API response dict to a Company domain object."""
+def _parse_company(
+    raw: dict[str, Any],
+    language: str,
+    legal_forms_map: dict[int, LegalForm] | None = None,
+) -> Company:
+    """Map a raw API response dict to a Company domain object.
+
+    Handles both the /firm/ endpoint shape (unauthenticated) and
+    the /company/ endpoint shape (authenticated).
+    """
+    # Address: only present in /company/ responses
     addr_raw = raw.get("address") or {}
     address = (
         Address(
@@ -88,13 +106,25 @@ def _parse_company(raw: dict[str, Any], language: str) -> Company:
         else None
     )
 
+    # Legal form: nested object in /company/, integer ID in /firm/
     legal_form = _parse_legal_form(raw.get("legalForm"), language)
+    if legal_form is None and legal_forms_map is not None:
+        lf_id = raw.get("legalFormId")
+        if lf_id is not None:
+            legal_form = legal_forms_map.get(int(lf_id))
+
+    # UID: use formatted version if available, fall back to raw
+    uid = raw.get("uidFormatted") or raw.get("uid", "")
+
+    # Status: map German values to English
+    raw_status = raw.get("status", "")
+    status = _STATUS_MAP.get(raw_status, raw_status)
 
     return Company(
         name=raw.get("name", "Unknown"),
-        uid=raw.get("uid", ""),
-        chid=raw.get("chid", ""),
-        status=raw.get("status", ""),
+        uid=uid,
+        chid=raw.get("chidFormatted") or raw.get("chid", ""),
+        status=status,
         legal_seat=raw.get("legalSeat", ""),
         canton=raw.get("canton", ""),
         legal_form=legal_form,
@@ -112,8 +142,10 @@ def _parse_company(raw: dict[str, Any], language: str) -> Company:
 class HttpZefixClient:
     """Real Zefix API client over HTTP.
 
-    Supports the unauthenticated ZefixREST API (default) and the official
-    ZefixPublicREST API (via env vars ZEFIX_USERNAME / ZEFIX_PASSWORD).
+    Uses the unauthenticated /firm/ endpoints by default (same as the
+    zefix.ch frontend). Supports the official ZefixPublicREST /company/
+    endpoints when credentials are provided via ZEFIX_USERNAME / ZEFIX_PASSWORD.
+
     All httpx exceptions are translated to domain exceptions in _request.
     """
 
@@ -124,11 +156,18 @@ class HttpZefixClient:
     password: str | None = field(default_factory=lambda: os.getenv("ZEFIX_PASSWORD"))
     _last_request_time: float = field(default=0.0, init=False, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _legal_forms_cache: dict[str, dict[int, LegalForm]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    @property
+    def _is_authenticated(self) -> bool:
+        return bool(self.username and self.password)
 
     @property
     def _auth(self) -> httpx.BasicAuth | None:
-        if self.username and self.password:
-            return httpx.BasicAuth(self.username, self.password)
+        if self._is_authenticated:
+            return httpx.BasicAuth(self.username, self.password)  # type: ignore[arg-type]
         return None
 
     async def _throttle(self) -> None:
@@ -151,7 +190,10 @@ class HttpZefixClient:
                 base_url=self.base_url,
                 timeout=_REQUEST_TIMEOUT,
                 auth=self._auth,
-                headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
+                headers={
+                    "User-Agent": _USER_AGENT,
+                    "Accept": "application/json, text/plain, */*",
+                },
             ) as client:
                 logger.debug("Zefix API %s %s", method, path)
                 response = await client.request(method, path, **kwargs)
@@ -174,6 +216,13 @@ class HttpZefixClient:
         except httpx.HTTPError as e:
             raise ZefixError(f"Unexpected Zefix API error: {method} {path}: {e}") from e
 
+    async def _get_legal_forms_map(self, language: str) -> dict[int, LegalForm]:
+        """Get a cached mapping of legal form ID -> LegalForm."""
+        if language not in self._legal_forms_cache:
+            forms = await self.list_legal_forms(language=language)
+            self._legal_forms_cache[language] = {f.id: f for f in forms}
+        return self._legal_forms_cache[language]
+
     async def search_companies(
         self,
         name: str,
@@ -195,49 +244,99 @@ class HttpZefixClient:
         if canton:
             body["canton"] = canton.upper()
 
-        data = await self._request("POST", "/company/search", json=body)
+        if self._is_authenticated:
+            data = await self._request("POST", "/company/search", json=body)
+            if not data:
+                return []
+            items = data if isinstance(data, list) else [data]
+            return [_parse_company(item, language) for item in items]
+
+        # Unauthenticated: use /firm/search.json
+        data = await self._request("POST", "/firm/search.json", json=body)
         if not data:
             return []
-        items = data if isinstance(data, list) else [data]
-        return [_parse_company(item, language) for item in items]
+        items = data.get("list", []) if isinstance(data, dict) else data
+        if not items:
+            return []
+        lf_map = await self._get_legal_forms_map(language)
+        return [_parse_company(item, language, lf_map) for item in items]
 
     async def get_company_by_uid(
         self, uid: str, *, language: str = "en"
     ) -> Company | None:
         uid_clean = normalize_uid(uid)
-        try:
-            data = await self._request(
-                "GET",
-                f"/company/uid/{uid_clean}",
-                params={"languageKey": language},
-            )
-        except ZefixNotFoundError:
+
+        if self._is_authenticated:
+            try:
+                data = await self._request(
+                    "GET",
+                    f"/company/uid/{uid_clean}",
+                    params={"languageKey": language},
+                )
+            except ZefixNotFoundError:
+                return None
+            if not data:
+                return None
+            items = data if isinstance(data, list) else [data]
+            return _parse_company(items[0], language) if items else None
+
+        # Unauthenticated: search by formatted UID
+        uid_formatted = (
+            f"{uid_clean[:3]}-{uid_clean[3:6]}.{uid_clean[6:9]}.{uid_clean[9:]}"
+        )
+        results = await self.search_companies(
+            uid_formatted,
+            active_only=False,
+            language=language,
+            max_entries=1,
+        )
+        if not results:
             return None
-        if not data:
-            return None
-        items = data if isinstance(data, list) else [data]
-        return _parse_company(items[0], language) if items else None
+        # Verify it's an exact UID match
+        for company in results:
+            if normalize_uid(company.uid) == uid_clean:
+                return company
+        return None
 
     async def get_company_by_chid(
         self, chid: str, *, language: str = "en"
     ) -> Company | None:
-        try:
-            data = await self._request(
-                "GET",
-                f"/company/chid/{chid}",
-                params={"languageKey": language},
-            )
-        except ZefixNotFoundError:
+        if self._is_authenticated:
+            try:
+                data = await self._request(
+                    "GET",
+                    f"/company/chid/{chid}",
+                    params={"languageKey": language},
+                )
+            except ZefixNotFoundError:
+                return None
+            if not data:
+                return None
+            items = data if isinstance(data, list) else [data]
+            return _parse_company(items[0], language) if items else None
+
+        # Unauthenticated: search by CHID
+        results = await self.search_companies(
+            chid,
+            active_only=False,
+            language=language,
+            max_entries=1,
+        )
+        if not results:
             return None
-        if not data:
-            return None
-        items = data if isinstance(data, list) else [data]
-        return _parse_company(items[0], language) if items else None
+        for company in results:
+            comp_chid = company.chid.replace("-", "")
+            if comp_chid == chid.replace("-", ""):
+                return company
+        return None
 
     async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]:
-        data = await self._request(
-            "GET", "/legalForm", params={"languageKey": language}
-        )
+        if self._is_authenticated:
+            data = await self._request(
+                "GET", "/legalForm", params={"languageKey": language}
+            )
+        else:
+            data = await self._request("GET", "/legalForm.json")
         if not data:
             return []
         items = data if isinstance(data, list) else [data]
