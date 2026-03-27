@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "Zefix",
-    description=(
+    instructions=(
         "Query the Swiss Zefix company register (Handelsregister). "
         "Search companies by name, look up by UID/CH-ID, and browse legal forms."
     ),
@@ -208,7 +208,7 @@ async def search_companies(
 
     Args:
         name: Company name to search for. Supports * wildcard.
-        canton: Two-letter canton code to filter by (e.g. ZH, BE, GE). Empty for all cantons.
+        canton: Two-letter canton code (e.g. ZH, BE, GE). Empty for all.
         active_only: If true, only return currently active companies.
         language: Response language (de, fr, it, en).
         max_results: Maximum number of results to return (1-100).
