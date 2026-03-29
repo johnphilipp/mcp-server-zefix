@@ -1,6 +1,6 @@
 """Tests for domain models and pure functions."""
 
-from mcp_server_zefix.models import Address, LegalForm, normalize_uid
+from mcp_server_zefix.models import Address, CompanyRef, LegalForm, normalize_uid
 from mcp_server_zefix.server import _format_company_detail, _format_company_summary
 from tests.conftest import make_company
 
@@ -96,3 +96,51 @@ class TestFormatCompanyDetail:
         company = make_company(capital=None)
         result = _format_company_detail(company)
         assert "Capital" not in result
+
+    def test_audit_firms_shown(self):
+        company = make_company(
+            audit_firms=(
+                CompanyRef(name="KPMG AG", uid="CHE-154.017.048", legal_seat="Basel"),
+            ),
+        )
+        result = _format_company_detail(company)
+        assert "KPMG AG" in result
+        assert "CHE-154.017.048" in result
+
+    def test_old_names_shown(self):
+        company = make_company(
+            old_names=("Suba Holz AG", "Huber Holzhandel AG"),
+        )
+        result = _format_company_detail(company)
+        assert "Suba Holz AG" in result
+        assert "Huber Holzhandel AG" in result
+
+    def test_taken_over_shown(self):
+        company = make_company(
+            taken_over=(
+                CompanyRef(name="Sandoz SA", uid="CHE-102.514.598", legal_seat="Basel"),
+            ),
+        )
+        result = _format_company_detail(company)
+        assert "Sandoz SA" in result
+        assert "Absorbed" in result
+
+    def test_branch_offices_capped_at_10(self):
+        branches = tuple(
+            CompanyRef(name=f"Branch {i}", uid=f"CHE-000.000.{i:03d}", legal_seat="X")
+            for i in range(15)
+        )
+        company = make_company(branch_offices=branches)
+        result = _format_company_detail(company)
+        assert "Branch 0" in result
+        assert "Branch 9" in result
+        assert "Branch 10" not in result
+        assert "5 more" in result
+
+    def test_empty_enrichment_fields_omitted(self):
+        company = make_company()
+        result = _format_company_detail(company)
+        assert "Audit" not in result
+        assert "Previous names" not in result
+        assert "Absorbed" not in result
+        assert "Branch" not in result

@@ -3,6 +3,7 @@
 from mcp_server_zefix.models import (
     Address,
     Company,
+    CompanyRef,
     LegalForm,
     ZefixError,
     normalize_uid,
@@ -23,6 +24,11 @@ def make_company(
     capital_currency: str = "CHF",
     shab_date: str = "2024-06-15",
     cantonal_excerpt_url: str = "https://zh.chregister.ch/cr-portal/auszug/12345",
+    audit_firms: tuple[CompanyRef, ...] = (),
+    taken_over: tuple[CompanyRef, ...] = (),
+    taken_over_by: tuple[CompanyRef, ...] = (),
+    branch_offices: tuple[CompanyRef, ...] = (),
+    old_names: tuple[str, ...] = (),
 ) -> Company:
     """Create a Company with sensible defaults. Override any field as needed."""
     if legal_form is None:
@@ -43,6 +49,11 @@ def make_company(
         capital_currency=capital_currency,
         shab_date=shab_date,
         cantonal_excerpt_url=cantonal_excerpt_url,
+        audit_firms=audit_firms,
+        taken_over=taken_over,
+        taken_over_by=taken_over_by,
+        branch_offices=branch_offices,
+        old_names=old_names,
     )
 
 

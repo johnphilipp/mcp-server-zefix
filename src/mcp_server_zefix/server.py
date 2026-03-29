@@ -68,6 +68,36 @@ def _format_company_detail(company: Company) -> str:
     if company.cantonal_excerpt_url:
         lines.append(f"**Cantonal register excerpt:** {company.cantonal_excerpt_url}")
 
+    if company.audit_firms:
+        firms = ", ".join(f"{f.name} ({f.uid})" for f in company.audit_firms)
+        lines.append(f"**Audit firm:** {firms}")
+
+    if company.old_names:
+        names = ", ".join(company.old_names)
+        lines.append(f"**Previous names:** {names}")
+
+    if company.taken_over:
+        items = "\n".join(
+            f"- {c.name} ({c.uid}), {c.legal_seat}" for c in company.taken_over
+        )
+        lines.append(f"**Absorbed companies:**\n{items}")
+
+    if company.taken_over_by:
+        items = ", ".join(f"{c.name} ({c.uid})" for c in company.taken_over_by)
+        lines.append(f"**Acquired by:** {items}")
+
+    if company.branch_offices:
+        if len(company.branch_offices) <= 10:
+            items = "\n".join(
+                f"- {b.name}, {b.legal_seat}" for b in company.branch_offices
+            )
+        else:
+            items = "\n".join(
+                f"- {b.name}, {b.legal_seat}" for b in company.branch_offices[:10]
+            )
+            items += f"\n- _... and {len(company.branch_offices) - 10} more_"
+        lines.append(f"**Branch offices ({len(company.branch_offices)}):**\n{items}")
+
     return "\n\n".join(lines)
 
 

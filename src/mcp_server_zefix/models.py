@@ -58,6 +58,19 @@ class LegalForm:
 
 
 @dataclass(frozen=True)
+class CompanyRef:
+    """A lightweight reference to another company.
+
+    Used for audit firms, takeover history, and branch offices.
+    """
+
+    name: str
+    uid: str
+    legal_seat: str = ""
+    status: str = ""
+
+
+@dataclass(frozen=True)
 class Company:
     """A company entry in the Swiss Zefix register.
 
@@ -79,6 +92,11 @@ class Company:
     shab_date: str = ""
     delete_date: str | None = None
     cantonal_excerpt_url: str = ""
+    audit_firms: tuple[CompanyRef, ...] = ()
+    taken_over: tuple[CompanyRef, ...] = ()
+    taken_over_by: tuple[CompanyRef, ...] = ()
+    branch_offices: tuple[CompanyRef, ...] = ()
+    old_names: tuple[str, ...] = ()
 
 
 def normalize_uid(uid: str) -> str:

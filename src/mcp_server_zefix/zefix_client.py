@@ -11,6 +11,7 @@ import httpx
 from mcp_server_zefix.models import (
     Address,
     Company,
+    CompanyRef,
     LegalForm,
     ZefixAPIError,
     ZefixConnectionError,
@@ -84,6 +85,36 @@ def _parse_legal_form(raw: Any, language: str) -> LegalForm | None:
     return LegalForm(id=int(fid), name=name)
 
 
+def _parse_company_refs(items: Any) -> tuple[CompanyRef, ...]:
+    """Parse a list of company references from the API response."""
+    if not items:
+        return ()
+    refs = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        uid = raw.get("uidFormatted") or raw.get("uid", "")
+        status = _STATUS_MAP.get(raw.get("status", ""), raw.get("status", ""))
+        refs.append(
+            CompanyRef(
+                name=raw.get("name", ""),
+                uid=uid,
+                legal_seat=raw.get("legalSeat", ""),
+                status=status,
+            )
+        )
+    return tuple(refs)
+
+
+def _parse_old_names(items: Any) -> tuple[str, ...]:
+    """Parse old company names from the API response."""
+    if not items:
+        return ()
+    return tuple(
+        item["name"] for item in items if isinstance(item, dict) and "name" in item
+    )
+
+
 def _parse_company(
     raw: dict[str, Any],
     language: str,
@@ -138,6 +169,11 @@ def _parse_company(
         shab_date=raw.get("shabDate", ""),
         delete_date=raw.get("deleteDate"),
         cantonal_excerpt_url=raw.get("cantonalExcerptWeb", ""),
+        audit_firms=_parse_company_refs(raw.get("auditFirms")),
+        taken_over=_parse_company_refs(raw.get("hasTakenOver")),
+        taken_over_by=_parse_company_refs(raw.get("wasTakenOverBy")),
+        branch_offices=_parse_company_refs(raw.get("branchOffices")),
+        old_names=_parse_old_names(raw.get("oldNames")),
     )
 
 
