@@ -33,16 +33,29 @@ class TestHandleSearch:
         assert "CHE-100.000.001" in result
         assert "Roche" not in result
 
-    async def test_bare_wildcard_returns_all(self):
+    async def test_bare_wildcard_without_filter_returns_message(self):
         fake = FakeZefixClient(
-            companies=[
-                make_company(name="Company A"),
-                make_company(name="Company B"),
-            ]
+            companies=[make_company(name="Company A")],
         )
         result = await handle_search(fake, "*")
-        assert "Company A" in result
-        assert "Company B" in result
+        assert "legal form filter" in result
+
+    async def test_bare_wildcard_with_legal_form_returns_results(self):
+        fake = FakeZefixClient(
+            companies=[
+                make_company(
+                    name="Foundation A",
+                    legal_form=make_legal_form(id=7, name="Foundation"),
+                ),
+                make_company(
+                    name="Corp B",
+                    legal_form=make_legal_form(id=3, name="Corporation"),
+                ),
+            ]
+        )
+        result = await handle_search(fake, "*", legal_form_ids=[7])
+        assert "Foundation A" in result
+        assert "Corp B" not in result
 
     async def test_wildcard_search(self):
         fake = FakeZefixClient(

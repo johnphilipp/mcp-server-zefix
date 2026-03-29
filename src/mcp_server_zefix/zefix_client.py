@@ -373,9 +373,13 @@ class HttpZefixClient:
             "maxEntries": api_limit,
             "offset": offset,
         }
-        # API rejects name="*" or name=""; omit name to get all results
+        # API requires either name or legalForms in the body
         if name and name != "*":
             firm_body["name"] = name
+        elif legal_form_ids:
+            firm_body["legalForms"] = legal_form_ids
+        else:
+            return []
 
         data = await self._request("POST", "/firm/search.json", json=firm_body)
         if not data:

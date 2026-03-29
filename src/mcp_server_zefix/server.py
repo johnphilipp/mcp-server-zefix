@@ -112,6 +112,12 @@ async def handle_search(
     legal_form_ids: list[int] | None = None,
 ) -> str:
     """Search for companies and return formatted Markdown results."""
+    if (not name or name == "*") and not legal_form_ids:
+        return (
+            "Please provide a company name or a legal form filter. "
+            "Use `*` with legal_form_ids to browse all companies of a type "
+            "(e.g. legal_form_ids='7' for foundations)."
+        )
     try:
         results = await client.search_companies(
             name,
