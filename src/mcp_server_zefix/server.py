@@ -109,6 +109,7 @@ async def handle_search(
     language: str = "en",
     max_results: int = 20,
     offset: int = 0,
+    legal_form_ids: list[int] | None = None,
 ) -> str:
     """Search for companies and return formatted Markdown results."""
     try:
@@ -116,6 +117,7 @@ async def handle_search(
             name,
             active_only=active_only,
             canton=canton,
+            legal_form_ids=legal_form_ids,
             language=language,
             max_entries=max_results,
             offset=offset,
@@ -263,6 +265,7 @@ async def search_companies(
     language: str = "en",
     max_results: int = 20,
     offset: int = 0,
+    legal_form_ids: str = "",
 ) -> str:
     """Search Swiss companies in the Zefix register by name.
 
@@ -276,9 +279,20 @@ async def search_companies(
         language: Response language (de, fr, it, en).
         max_results: Maximum number of results to return (1-100).
         offset: Pagination offset for retrieving additional results.
+        legal_form_ids: Comma-separated legal form IDs (e.g. "3,4").
     """
+    parsed_ids: list[int] | None = None
+    if legal_form_ids:
+        parsed_ids = [int(x.strip()) for x in legal_form_ids.split(",") if x.strip()]
     return await handle_search(
-        _client, name, canton, active_only, language, max_results, offset
+        _client,
+        name,
+        canton,
+        active_only,
+        language,
+        max_results,
+        offset,
+        legal_form_ids=parsed_ids,
     )
 
 

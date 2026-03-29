@@ -57,6 +57,23 @@ class TestHandleSearch:
         assert "Zurich AG" in result
         assert "Basel AG" not in result
 
+    async def test_filters_by_legal_form(self):
+        fake = FakeZefixClient(
+            companies=[
+                make_company(
+                    name="Corp AG",
+                    legal_form=make_legal_form(id=3, name="AG"),
+                ),
+                make_company(
+                    name="Small GmbH",
+                    legal_form=make_legal_form(id=4, name="GmbH"),
+                ),
+            ]
+        )
+        result = await handle_search(fake, "*", legal_form_ids=[3])
+        assert "Corp AG" in result
+        assert "Small GmbH" not in result
+
     async def test_filters_inactive_by_default(self):
         fake = FakeZefixClient(
             companies=[

@@ -99,6 +99,7 @@ class FakeZefixClient:
         *,
         active_only: bool = True,
         canton: str = "",
+        legal_form_ids: list[int] | None = None,
         language: str = "en",
         max_entries: int = 20,
         offset: int = 0,
@@ -113,6 +114,10 @@ class FakeZefixClient:
             results = [c for c in results if c.status == "ACTIVE"]
         if canton:
             results = [c for c in results if c.canton.upper() == canton.upper()]
+        if legal_form_ids:
+            results = [
+                c for c in results if c.legal_form and c.legal_form.id in legal_form_ids
+            ]
 
         return results[offset : offset + max_entries]
 

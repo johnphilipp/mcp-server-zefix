@@ -39,6 +39,7 @@ class AbstractZefixClient(Protocol):
         *,
         active_only: bool = True,
         canton: str = "",
+        legal_form_ids: list[int] | None = None,
         language: str = "en",
         max_entries: int = 20,
         offset: int = 0,
@@ -306,6 +307,7 @@ class HttpZefixClient:
         *,
         active_only: bool = True,
         canton: str = "",
+        legal_form_ids: list[int] | None = None,
         language: str = "en",
         max_entries: int = 20,
         offset: int = 0,
@@ -320,6 +322,8 @@ class HttpZefixClient:
         }
         if canton:
             body["canton"] = canton.upper()
+        if legal_form_ids:
+            body["legalForms"] = legal_form_ids
 
         if self._is_authenticated:
             data = await self._request("POST", "/company/search", json=body)
