@@ -94,17 +94,20 @@ def _parse_company(
     Handles both the /firm/ endpoint shape (unauthenticated) and
     the /company/ endpoint shape (authenticated).
     """
-    # Address: only present in /company/ responses
+    # Address: present in /company/ and /firm/{ehraid} detail responses
     addr_raw = raw.get("address") or {}
-    address = (
-        Address(
-            street=addr_raw.get("street", ""),
+    if addr_raw:
+        street = addr_raw.get("street", "")
+        house_number = addr_raw.get("houseNumber", "")
+        if house_number:
+            street = f"{street} {house_number}".strip()
+        address = Address(
+            street=street,
             zip_code=addr_raw.get("swissZipCode", ""),
-            city=addr_raw.get("city", ""),
+            city=addr_raw.get("city", "") or addr_raw.get("town", ""),
         )
-        if addr_raw
-        else None
-    )
+    else:
+        address = None
 
     # Legal form: nested object in /company/, integer ID in /firm/
     legal_form = _parse_legal_form(raw.get("legalForm"), language)
@@ -216,6 +219,12 @@ class HttpZefixClient:
         except httpx.HTTPError as e:
             raise ZefixError(f"Unexpected Zefix API error: {method} {path}: {e}") from e
 
+    async def _get_company_detail(self, ehraid: int, language: str) -> Company:
+        """Fetch full company detail via /firm/{ehraid}/withoutShabPub.json."""
+        data = await self._request("GET", f"/firm/{ehraid}/withoutShabPub.json")
+        lf_map = await self._get_legal_forms_map(language)
+        return _parse_company(data, language, lf_map)
+
     async def _get_legal_forms_map(self, language: str) -> dict[int, LegalForm]:
         """Get a cached mapping of legal form ID -> LegalForm."""
         if language not in self._legal_forms_cache:
@@ -280,22 +289,34 @@ class HttpZefixClient:
             items = data if isinstance(data, list) else [data]
             return _parse_company(items[0], language) if items else None
 
-        # Unauthenticated: search by formatted UID
+        # Unauthenticated: search to find ehraid, then fetch full detail
         uid_formatted = (
             f"{uid_clean[:3]}-{uid_clean[3:6]}.{uid_clean[6:9]}.{uid_clean[9:]}"
         )
-        results = await self.search_companies(
-            uid_formatted,
-            active_only=False,
-            language=language,
-            max_entries=1,
+        data = await self._request(
+            "POST",
+            "/firm/search.json",
+            json={
+                "name": uid_formatted,
+                "activeOnly": False,
+                "languageKey": language,
+                "maxEntries": 1,
+            },
         )
-        if not results:
+        if not data:
             return None
-        # Verify it's an exact UID match
-        for company in results:
-            if normalize_uid(company.uid) == uid_clean:
-                return company
+        items = data.get("list", []) if isinstance(data, dict) else data
+        if not items:
+            return None
+        # Verify exact UID match and fetch detail
+        for item in items:
+            item_uid = item.get("uidFormatted") or item.get("uid", "")
+            if normalize_uid(item_uid) == uid_clean:
+                ehraid = item.get("ehraid")
+                if ehraid is not None:
+                    return await self._get_company_detail(ehraid, language)
+                lf_map = await self._get_legal_forms_map(language)
+                return _parse_company(item, language, lf_map)
         return None
 
     async def get_company_by_chid(
@@ -315,19 +336,32 @@ class HttpZefixClient:
             items = data if isinstance(data, list) else [data]
             return _parse_company(items[0], language) if items else None
 
-        # Unauthenticated: search by CHID
-        results = await self.search_companies(
-            chid,
-            active_only=False,
-            language=language,
-            max_entries=1,
+        # Unauthenticated: search to find ehraid, then fetch full detail
+        data = await self._request(
+            "POST",
+            "/firm/search.json",
+            json={
+                "name": chid,
+                "activeOnly": False,
+                "languageKey": language,
+                "maxEntries": 1,
+            },
         )
-        if not results:
+        if not data:
             return None
-        for company in results:
-            comp_chid = company.chid.replace("-", "")
-            if comp_chid == chid.replace("-", ""):
-                return company
+        items = data.get("list", []) if isinstance(data, dict) else data
+        if not items:
+            return None
+        for item in items:
+            item_chid = (item.get("chidFormatted") or item.get("chid", "")).replace(
+                "-", ""
+            )
+            if item_chid == chid.replace("-", ""):
+                ehraid = item.get("ehraid")
+                if ehraid is not None:
+                    return await self._get_company_detail(ehraid, language)
+                lf_map = await self._get_legal_forms_map(language)
+                return _parse_company(item, language, lf_map)
         return None
 
     async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]:
