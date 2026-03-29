@@ -68,6 +68,36 @@ _USER_AGENT = (
 _REQUEST_TIMEOUT = 30.0
 _MIN_REQUEST_INTERVAL = 1.0  # seconds
 
+# Canton code → cantonal register office IDs (stable federal numbers)
+_CANTON_REGISTER_OFFICES: dict[str, tuple[int, ...]] = {
+    "ZH": (20,),
+    "BE": (36,),
+    "LU": (100,),
+    "UR": (120,),
+    "SZ": (130,),
+    "OW": (140,),
+    "NW": (150,),
+    "GL": (160,),
+    "ZG": (170,),
+    "FR": (217,),
+    "SO": (241,),
+    "BS": (270,),
+    "BL": (280,),
+    "SH": (290,),
+    "AR": (300,),
+    "AI": (310,),
+    "SG": (320,),
+    "GR": (350,),
+    "AG": (400,),
+    "TG": (440,),
+    "TI": (501,),
+    "VD": (550,),
+    "VS": (626,),
+    "NE": (645,),
+    "GE": (660,),
+    "JU": (670,),
+}
+
 # The unauthenticated API uses German status values
 _STATUS_MAP = {
     "EXISTIEREND": "ACTIVE",
@@ -313,32 +343,57 @@ class HttpZefixClient:
         offset: int = 0,
     ) -> list[Company]:
         max_entries = max(1, min(max_entries, 100))
-        body: dict[str, Any] = {
-            "name": name,
-            "activeOnly": active_only,
-            "languageKey": language,
-            "maxEntries": max_entries,
-            "offset": offset,
-        }
-        if canton:
-            body["canton"] = canton.upper()
-        if legal_form_ids:
-            body["legalForms"] = legal_form_ids
 
         if self._is_authenticated:
+            body: dict[str, Any] = {
+                "name": name,
+                "activeOnly": active_only,
+                "languageKey": language,
+                "maxEntries": max_entries,
+                "offset": offset,
+            }
+            if canton:
+                body["canton"] = canton.upper()
+            if legal_form_ids:
+                body["legalForms"] = legal_form_ids
             data = await self._request("POST", "/company/search", json=body)
             if not data:
                 return []
             items = data if isinstance(data, list) else [data]
             return [_parse_company(item, language) for item in items]
 
-        # Unauthenticated: use /firm/search.json
-        data = await self._request("POST", "/firm/search.json", json=body)
+        # Unauthenticated: /firm/search.json ignores canton and legalForms
+        # filters, so we over-fetch and filter client-side.
+        needs_client_filter = bool(canton or legal_form_ids)
+        api_limit = 100 if needs_client_filter else max_entries
+
+        firm_body: dict[str, Any] = {
+            "activeOnly": active_only,
+            "languageKey": language,
+            "maxEntries": api_limit,
+            "offset": offset,
+        }
+        # API rejects name="*" or name=""; omit name to get all results
+        if name and name != "*":
+            firm_body["name"] = name
+
+        data = await self._request("POST", "/firm/search.json", json=firm_body)
         if not data:
             return []
         items = data.get("list", []) if isinstance(data, dict) else data
         if not items:
             return []
+
+        # Client-side filtering
+        if legal_form_ids:
+            lf_set = set(legal_form_ids)
+            items = [i for i in items if i.get("legalFormId") in lf_set]
+        if canton:
+            office_ids = _CANTON_REGISTER_OFFICES.get(canton.upper())
+            if office_ids:
+                items = [i for i in items if i.get("registerOfficeId") in office_ids]
+
+        items = items[:max_entries]
         lf_map = await self._get_legal_forms_map(language)
         return [_parse_company(item, language, lf_map) for item in items]
 
