@@ -1,35 +1,35 @@
 # mcp-server-zefix
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for querying the Swiss [Zefix](https://www.zefix.ch/) company register (Zentraler Firmenindex / Handelsregister).
+Look up any Swiss company directly from Claude.
 
-Search Swiss companies by name, look up detailed company information by UID or CH-ID, and browse legal forms -- all accessible as MCP tools from Claude Desktop, Claude Code, or any MCP-compatible client.
+[![PyPI](https://img.shields.io/pypi/v/mcp-server-zefix)](https://pypi.org/project/mcp-server-zefix/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://github.com/johnphilipp/mcp-server-zefix/actions/workflows/test.yml/badge.svg)](https://github.com/johnphilipp/mcp-server-zefix/actions/workflows/test.yml)
 
-## Features
+An [MCP](https://modelcontextprotocol.io/) server that connects Claude to [Zefix](https://www.zefix.ch/), Switzerland's official company register (Handelsregister). Zefix is operated by the Federal Office of Justice and provides authoritative data from all 26 cantonal commercial registers -- company details, legal forms, audit firms, corporate history, and official gazette publications.
 
-- **Search companies** by name with wildcard support, canton filter, and pagination
-- **Look up companies** by UID (Unternehmens-Identifikationsnummer) or CH-ID
-- **Browse legal forms** (Rechtsformen) recognized by the Swiss commercial register
-- **Dual API support**: works out of the box with the public Zefix API (no credentials needed), with optional support for the official ZefixPublicREST API
-- **Rate limiting** built in to respect Zefix API usage guidelines
-- Accepts UID in any format (CHE-123.456.789, CHE123456789, 123456789)
+## What you can ask
 
-## Available Tools
+- "Search for Novartis on Zefix"
+- "Find all foundations in Basel"
+- "Who audits Novartis AG?"
+- "What companies has Novartis taken over?"
+- "Show me the corporate history of Huber Baustoffe AG"
+- "What capital changes has cohaga AG had recently?"
+- "Find all GmbHs in Zurich"
+- "List all Swiss legal forms in English"
 
-| Tool | Description |
-|---|---|
-| `search_companies` | Search companies by name with optional canton, status, and language filters |
-| `get_company_by_uid` | Get full company details by UID number |
-| `get_company_by_chid` | Get full company details by CH-ID |
-| `list_legal_forms` | List all Swiss legal forms with their IDs |
+## Quick Start
 
-## Installation
+### Claude Code
+
+```bash
+claude mcp add zefix -- uvx mcp-server-zefix
+```
 
 ### Claude Desktop
 
-Add to your `claude_desktop_config.json`:
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+Add to your `claude_desktop_config.json` (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
 ```json
 {
@@ -42,38 +42,34 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-### Claude Code
+No API key or credentials needed. Works out of the box.
 
-```bash
-claude mcp add zefix -- uvx mcp-server-zefix
-```
+## Tools
 
-### From source (development)
+| Tool | Description |
+|---|---|
+| `search_companies` | Search by name (wildcards supported), filter by canton and legal form |
+| `get_company_by_uid` | Full company profile: address, purpose, audit firm, takeover history, branch offices, previous names |
+| `get_company_by_chid` | Same as above, using the CH-ID identifier |
+| `get_company_publications` | SHAB timeline: board changes, capital changes, mergers, address changes, and more |
+| `list_legal_forms` | All Swiss legal forms (AG, GmbH, Stiftung, etc.) with IDs for filtering |
 
-```bash
-git clone https://github.com/johnphilipp/mcp-server-zefix.git
-cd mcp-server-zefix
-uv sync --all-extras
-```
+## What you get
 
-Then configure Claude Desktop to run from source:
+A company lookup returns:
 
-```json
-{
-  "mcpServers": {
-    "zefix": {
-      "command": "uv",
-      "args": ["--directory", "/absolute/path/to/mcp-server-zefix", "run", "mcp-server-zefix"]
-    }
-  }
-}
-```
+- **Identifiers** -- name, UID, CH-ID, status, legal form
+- **Location** -- registered office, full address
+- **Purpose** -- the company's stated business purpose
+- **Audit firm** -- name and UID of the auditor
+- **Corporate history** -- companies absorbed, acquisitions, previous names
+- **Branch offices** -- all registered branch locations
+- **SHAB publications** -- timeline of legally significant events from the Swiss Official Gazette (board changes, capital changes, mergers, purpose changes)
+- **Cantonal register link** -- direct link to the full excerpt with board members and signatories
 
 ## Configuration
 
-The server works out of the box with no configuration, using the public Zefix API.
-
-### Environment Variables
+Works with zero configuration using the public Zefix API. For the official authenticated API, set these environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -81,9 +77,7 @@ The server works out of the box with no configuration, using the public Zefix AP
 | `ZEFIX_USERNAME` | _(none)_ | Username for ZefixPublicREST API |
 | `ZEFIX_PASSWORD` | _(none)_ | Password for ZefixPublicREST API |
 
-### Using the official ZefixPublicREST API
-
-To use the officially documented API (recommended for production), request credentials by emailing `zefix@bj.admin.ch` with your name, organization, and intended use. Then configure:
+To use the official API, request credentials from `zefix@bj.admin.ch`, then:
 
 ```json
 {
@@ -101,36 +95,26 @@ To use the officially documented API (recommended for production), request crede
 }
 ```
 
-## Architecture
-
-This project follows principles from [Architecture Patterns with Python](https://www.cosmicpython.com/) (Percival & Gregory):
-
-- **Domain models** (`models.py`): Immutable value objects (`Company`, `LegalForm`, `Address`) and domain exceptions (`ZefixConnectionError`, `ZefixTimeoutError`, etc.) -- the shared language of the Swiss commercial register, free of infrastructure dependencies
-- **Abstract client protocol** (`zefix_client.py`): `AbstractZefixClient` is the port; `HttpZefixClient` is the adapter that translates HTTP responses to domain objects and httpx exceptions to domain exceptions
-- **Service layer** (`server.py`): `handle_*` functions contain orchestration logic, depend on the abstract client, and catch only domain exceptions -- they never import httpx
-- **Fakes over mocks**: Tests use `FakeZefixClient`, a working in-memory implementation -- no HTTP mocking libraries needed, test files never import httpx
-
 ## Development
 
 ```bash
-# Install with dev dependencies
+git clone https://github.com/johnphilipp/mcp-server-zefix.git
+cd mcp-server-zefix
 uv sync --all-extras
 
-# Run linter
-uv run ruff check .
-
-# Run tests
-uv run pytest tests/ -v
-
-# Launch MCP Inspector for interactive testing
-npx @modelcontextprotocol/inspector uv --directory . run mcp-server-zefix
+uv run ruff check .           # lint
+uv run pytest tests/ -v       # test (50 tests, all use fakes, no network)
+npx @modelcontextprotocol/inspector uv --directory . run mcp-server-zefix  # interactive
 ```
 
-## About Zefix
+## Architecture
 
-[Zefix](https://www.zefix.ch/) (Zentraler Firmenindex) is the central business name index of Switzerland, operated by the Federal Office of Justice. It provides access to company data from all cantonal commercial registers.
+Follows [Architecture Patterns with Python](https://www.cosmicpython.com/) (Percival & Gregory):
 
-**Note:** Board members, signatories, and detailed corporate governance information are not available through Zefix. For this data, follow the cantonal register excerpt link (`cantonalExcerptWeb`) returned in company details.
+- **Domain models** (`models.py`) -- frozen dataclasses (`Company`, `LegalForm`, `ShabPublication`), domain exceptions, no infrastructure imports
+- **Port + adapter** (`zefix_client.py`) -- `AbstractZefixClient` protocol; `HttpZefixClient` translates HTTP to domain objects and httpx exceptions to domain exceptions
+- **Service layer** (`server.py`) -- `handle_*` functions accept the abstract client, never import httpx
+- **Fakes over mocks** -- tests use `FakeZefixClient`, a working in-memory implementation; test files never import httpx
 
 ## License
 
