@@ -5,6 +5,7 @@ from mcp_server_zefix.models import (
     Company,
     CompanyRef,
     LegalForm,
+    ShabPublication,
     ZefixError,
     normalize_uid,
 )
@@ -65,6 +66,15 @@ def make_legal_form(
     return LegalForm(id=id, name=name)
 
 
+def make_shab_publication(
+    date: str = "2024-01-15",
+    message: str = "Company registration updated.",
+    mutation_types: tuple[str, ...] = ("Board/management change",),
+) -> ShabPublication:
+    """Create a ShabPublication with sensible defaults."""
+    return ShabPublication(date=date, message=message, mutation_types=mutation_types)
+
+
 class FakeZefixClient:
     """In-memory fake of AbstractZefixClient for testing.
 
@@ -75,10 +85,12 @@ class FakeZefixClient:
         self,
         companies: list[Company] | None = None,
         legal_forms: list[LegalForm] | None = None,
+        publications: list[ShabPublication] | None = None,
         error: ZefixError | None = None,
     ) -> None:
         self.companies: list[Company] = list(companies or [])
         self.legal_forms: list[LegalForm] = list(legal_forms or [])
+        self.publications: list[ShabPublication] = list(publications or [])
         self.error = error
 
     async def search_companies(
@@ -131,3 +143,10 @@ class FakeZefixClient:
         if self.error:
             raise self.error
         return list(self.legal_forms)
+
+    async def get_company_publications(
+        self, uid: str, *, language: str = "en"
+    ) -> list[ShabPublication]:
+        if self.error:
+            raise self.error
+        return list(self.publications)

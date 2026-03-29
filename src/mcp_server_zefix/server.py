@@ -222,6 +222,39 @@ async def handle_list_legal_forms(
     return "\n".join(lines)
 
 
+async def handle_get_publications(
+    client: AbstractZefixClient,
+    uid: str,
+    language: str = "en",
+) -> str:
+    """Get SHAB publications for a company and return formatted timeline."""
+    try:
+        publications = await client.get_company_publications(uid, language=language)
+    except ZefixConnectionError:
+        return "Could not connect to the Zefix API."
+    except ZefixTimeoutError:
+        return "Request timed out."
+    except ZefixAPIError as e:
+        return f"Zefix API error (HTTP {e.status_code})."
+    except ZefixError as e:
+        logger.exception("Unexpected Zefix error fetching publications")
+        return f"An unexpected error occurred: {e}"
+
+    if not publications:
+        normalized = normalize_uid(uid)
+        return f"No SHAB publications found for UID '{uid}' (searched as {normalized})."
+
+    lines = [f"# SHAB Publications ({len(publications)})\n"]
+    for pub in publications:
+        types_str = ", ".join(pub.mutation_types) if pub.mutation_types else "Update"
+        lines.append(f"**{pub.date}** — {types_str}")
+        if pub.message:
+            lines.append(pub.message)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 @mcp.tool()
 async def search_companies(
     name: str,
@@ -289,6 +322,20 @@ async def list_legal_forms(language: str = "de") -> str:
         language: Language for legal form names (de, fr, it, en).
     """
     return await handle_list_legal_forms(_client, language)
+
+
+@mcp.tool()
+async def get_company_publications(uid: str, language: str = "en") -> str:
+    """Get SHAB publications (Swiss Official Gazette) for a company.
+
+    Returns a timeline of legally significant events: board changes,
+    capital changes, mergers, address changes, purpose changes, etc.
+
+    Args:
+        uid: Company UID in any format (e.g. CHE-123.456.789 or CHE123456789).
+        language: Response language (de, fr, it, en).
+    """
+    return await handle_get_publications(_client, uid, language)
 
 
 def main() -> None:

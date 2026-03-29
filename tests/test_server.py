@@ -7,11 +7,17 @@ from mcp_server_zefix.models import (
 )
 from mcp_server_zefix.server import (
     handle_chid_lookup,
+    handle_get_publications,
     handle_list_legal_forms,
     handle_search,
     handle_uid_lookup,
 )
-from tests.conftest import FakeZefixClient, make_company, make_legal_form
+from tests.conftest import (
+    FakeZefixClient,
+    make_company,
+    make_legal_form,
+    make_shab_publication,
+)
 
 
 class TestHandleSearch:
@@ -175,4 +181,37 @@ class TestHandleListLegalForms:
     async def test_connection_error_handled(self):
         fake = FakeZefixClient(error=ZefixConnectionError("down"))
         result = await handle_list_legal_forms(fake)
+        assert "Could not connect" in result
+
+
+class TestHandleGetPublications:
+    async def test_returns_timeline(self):
+        fake = FakeZefixClient(
+            publications=[
+                make_shab_publication(
+                    date="2026-03-23",
+                    message="Capital increased to CHF 111,111.20",
+                    mutation_types=("Capital change",),
+                ),
+                make_shab_publication(
+                    date="2025-02-18",
+                    message="Board member changed.",
+                    mutation_types=("Board/management change",),
+                ),
+            ]
+        )
+        result = await handle_get_publications(fake, "CHE-112.158.921")
+        assert "2026-03-23" in result
+        assert "Capital change" in result
+        assert "2025-02-18" in result
+        assert "Board/management change" in result
+
+    async def test_no_publications(self):
+        fake = FakeZefixClient(publications=[])
+        result = await handle_get_publications(fake, "CHE-000.000.000")
+        assert "No SHAB publications" in result
+
+    async def test_connection_error_handled(self):
+        fake = FakeZefixClient(error=ZefixConnectionError("down"))
+        result = await handle_get_publications(fake, "CHE-123.456.789")
         assert "Could not connect" in result

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -13,6 +14,7 @@ from mcp_server_zefix.models import (
     Company,
     CompanyRef,
     LegalForm,
+    ShabPublication,
     ZefixAPIError,
     ZefixConnectionError,
     ZefixError,
@@ -52,6 +54,10 @@ class AbstractZefixClient(Protocol):
 
     async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]: ...
 
+    async def get_company_publications(
+        self, uid: str, *, language: str = "en"
+    ) -> list[ShabPublication]: ...
+
 
 _DEFAULT_BASE_URL = "https://www.zefix.ch/ZefixREST/api/v1"
 _USER_AGENT = (
@@ -66,6 +72,32 @@ _STATUS_MAP = {
     "EXISTIEREND": "ACTIVE",
     "GELOESCHT": "DELETED",
 }
+
+
+_MUTATION_TYPE_LABELS = {
+    "kapitalaenderung": "Capital change",
+    "kapitalaenderung.libriert": "Capital paid in",
+    "kapitalaenderung.nominell": "Nominal capital change",
+    "kapitalaenderung.stueckelung": "Share denomination change",
+    "aenderungorgane": "Board/management change",
+    "adressaenderung": "Address change",
+    "zweckaenderung": "Purpose change",
+    "neueintr": "New registration",
+    "mutation": "Mutation",
+    "loeschung": "Deletion",
+    "konkurs": "Bankruptcy",
+    "fusion": "Merger",
+    "umwandlung": "Conversion",
+    "spaltung": "Demerger",
+    "revisionsstelle": "Audit firm change",
+}
+
+_XML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_xml_tags(text: str) -> str:
+    """Remove XML/HTML tags from SHAB message text."""
+    return _XML_TAG_RE.sub("", text).replace("&apos;", "'").replace("&amp;", "&")
 
 
 def _parse_legal_form(raw: Any, language: str) -> LegalForm | None:
@@ -416,3 +448,51 @@ class HttpZefixClient:
             if lf is not None:
                 result.append(lf)
         return result
+
+    async def _find_ehraid(self, uid: str, language: str) -> int | None:
+        """Search by UID and return the ehraid if found."""
+        uid_clean = normalize_uid(uid)
+        uid_formatted = (
+            f"{uid_clean[:3]}-{uid_clean[3:6]}.{uid_clean[6:9]}.{uid_clean[9:]}"
+        )
+        data = await self._request(
+            "POST",
+            "/firm/search.json",
+            json={
+                "name": uid_formatted,
+                "activeOnly": False,
+                "languageKey": language,
+                "maxEntries": 1,
+            },
+        )
+        if not data:
+            return None
+        items = data.get("list", []) if isinstance(data, dict) else data
+        for item in items:
+            item_uid = item.get("uidFormatted") or item.get("uid", "")
+            if normalize_uid(item_uid) == uid_clean:
+                return item.get("ehraid")
+        return None
+
+    async def get_company_publications(
+        self, uid: str, *, language: str = "en"
+    ) -> list[ShabPublication]:
+        ehraid = await self._find_ehraid(uid, language)
+        if ehraid is None:
+            return []
+        data = await self._request("GET", f"/firm/{ehraid}/shabPub.json")
+        if not data:
+            return []
+        items = data if isinstance(data, list) else [data]
+        publications = []
+        for item in items:
+            mutation_keys = [m.get("key", "") for m in item.get("mutationTypes", [])]
+            labels = tuple(_MUTATION_TYPE_LABELS.get(k, k) for k in mutation_keys)
+            publications.append(
+                ShabPublication(
+                    date=item.get("shabDate", ""),
+                    message=_strip_xml_tags(item.get("message", "")),
+                    mutation_types=labels,
+                )
+            )
+        return publications

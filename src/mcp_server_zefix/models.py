@@ -99,6 +99,15 @@ class Company:
     old_names: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ShabPublication:
+    """A SHAB (Swiss Official Gazette of Commerce) publication entry."""
+
+    date: str
+    message: str
+    mutation_types: tuple[str, ...] = ()
+
+
 def normalize_uid(uid: str) -> str:
     """Normalize a UID to the format expected by the Zefix API.
 
