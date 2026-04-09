@@ -68,6 +68,7 @@ class CompanyRef:
     uid: str
     legal_seat: str = ""
     status: str = ""
+    ehraid: int = 0
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ class Company:
     taken_over: tuple[CompanyRef, ...] = ()
     taken_over_by: tuple[CompanyRef, ...] = ()
     branch_offices: tuple[CompanyRef, ...] = ()
+    head_offices: tuple[CompanyRef, ...] = ()
     old_names: tuple[str, ...] = ()
 
 

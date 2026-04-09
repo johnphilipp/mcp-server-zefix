@@ -53,7 +53,11 @@ class AbstractZefixClient(Protocol):
         self, chid: str, *, language: str = "en"
     ) -> Company | None: ...
 
-    async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]: ...
+    async def list_legal_forms(self, *, language: str = "en") -> list[LegalForm]: ...
+
+    async def get_company_by_ehraid(
+        self, ehraid: int, *, language: str = "en"
+    ) -> Company | None: ...
 
     async def get_company_publications(
         self, uid: str, *, language: str = "en"
@@ -164,6 +168,7 @@ def _parse_company_refs(items: Any) -> tuple[CompanyRef, ...]:
                 uid=uid,
                 legal_seat=raw.get("legalSeat", ""),
                 status=status,
+                ehraid=raw.get("ehraid", 0) or 0,
             )
         )
     return tuple(refs)
@@ -236,6 +241,10 @@ def _parse_company(
         taken_over=_parse_company_refs(raw.get("hasTakenOver")),
         taken_over_by=_parse_company_refs(raw.get("wasTakenOverBy")),
         branch_offices=_parse_company_refs(raw.get("branchOffices")),
+        head_offices=(
+            _parse_company_refs(raw.get("mainOffices"))
+            + _parse_company_refs(raw.get("furtherMainOffices"))
+        ),
         old_names=_parse_old_names(raw.get("oldNames")),
     )
 
@@ -323,6 +332,28 @@ class HttpZefixClient:
         data = await self._request("GET", f"/firm/{ehraid}/withoutShabPub.json")
         lf_map = await self._get_legal_forms_map(language)
         return _parse_company(data, language, lf_map)
+
+    async def get_company_by_ehraid(
+        self, ehraid: int, *, language: str = "en"
+    ) -> Company | None:
+        if self._is_authenticated:
+            try:
+                data = await self._request(
+                    "GET",
+                    f"/company/ehraid/{ehraid}",
+                    params={"languageKey": language},
+                )
+            except ZefixNotFoundError:
+                return None
+            if not data:
+                return None
+            items = data if isinstance(data, list) else [data]
+            return _parse_company(items[0], language) if items else None
+
+        try:
+            return await self._get_company_detail(ehraid, language)
+        except ZefixNotFoundError:
+            return None
 
     async def _get_legal_forms_map(self, language: str) -> dict[int, LegalForm]:
         """Get a cached mapping of legal form ID -> LegalForm."""
@@ -495,7 +526,7 @@ class HttpZefixClient:
                 return _parse_company(item, language, lf_map)
         return None
 
-    async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]:
+    async def list_legal_forms(self, *, language: str = "en") -> list[LegalForm]:
         if self._is_authenticated:
             data = await self._request(
                 "GET", "/legalForm", params={"languageKey": language}

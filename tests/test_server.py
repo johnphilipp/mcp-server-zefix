@@ -1,12 +1,15 @@
 """Service layer tests using FakeZefixClient."""
 
 from mcp_server_zefix.models import (
+    Address,
+    CompanyRef,
     ZefixAPIError,
     ZefixConnectionError,
     ZefixTimeoutError,
 )
 from mcp_server_zefix.server import (
     handle_chid_lookup,
+    handle_company_structure,
     handle_get_publications,
     handle_list_legal_forms,
     handle_search,
@@ -256,3 +259,173 @@ class TestHandleGetPublications:
         fake = FakeZefixClient(error=ZefixConnectionError("down"))
         result = await handle_get_publications(fake, "CHE-123.456.789")
         assert "Could not connect" in result
+
+
+class TestHandleCompanyStructure:
+    async def test_parent_shows_full_addresses(self):
+        branch_bern = make_company(
+            name="Branch Bern",
+            uid="CHE-200.000.001",
+            address=Address(
+                street="Marktgasse 10", zip_code="3011", city="Bern"
+            ),
+            status="ACTIVE",
+        )
+        branch_basel = make_company(
+            name="Branch Basel",
+            uid="CHE-200.000.002",
+            address=Address(
+                street="Freie Strasse 5", zip_code="4001", city="Basel"
+            ),
+            status="ACTIVE",
+        )
+        branches = (
+            CompanyRef(
+                name="Branch Bern",
+                uid="CHE-200.000.001",
+                legal_seat="Bern",
+                status="ACTIVE",
+                ehraid=1001,
+            ),
+            CompanyRef(
+                name="Branch Basel",
+                uid="CHE-200.000.002",
+                legal_seat="Basel",
+                status="ACTIVE",
+                ehraid=1002,
+            ),
+        )
+        parent = make_company(
+            name="HQ AG",
+            uid="CHE-100.000.001",
+            branch_offices=branches,
+        )
+        fake = FakeZefixClient(
+            companies=[parent],
+            ehraid_map={1001: branch_bern, 1002: branch_basel},
+        )
+        result = await handle_company_structure(fake, "CHE-100.000.001")
+        assert "Company Structure" in result
+        assert "HQ AG" in result
+        assert "Head office" in result
+        assert "Marktgasse 10, 3011 Bern" in result
+        assert "Freie Strasse 5, 4001 Basel" in result
+
+    async def test_branch_navigates_to_parent(self):
+        branch_detail = make_company(
+            name="Branch Bern",
+            uid="CHE-200.000.001",
+            address=Address(
+                street="Marktgasse 10", zip_code="3011", city="Bern"
+            ),
+            status="ACTIVE",
+        )
+        branches = (
+            CompanyRef(
+                name="Branch Bern",
+                uid="CHE-200.000.001",
+                legal_seat="Bern",
+                status="ACTIVE",
+                ehraid=1001,
+            ),
+        )
+        parent = make_company(
+            name="HQ AG",
+            uid="CHE-100.000.001",
+            branch_offices=branches,
+        )
+        branch = make_company(
+            name="Branch Bern",
+            uid="CHE-200.000.001",
+            head_offices=(
+                CompanyRef(
+                    name="HQ AG",
+                    uid="CHE-100.000.001",
+                    legal_seat="Zurich",
+                    status="ACTIVE",
+                ),
+            ),
+        )
+        fake = FakeZefixClient(
+            companies=[parent, branch],
+            ehraid_map={1001: branch_detail},
+        )
+        result = await handle_company_structure(fake, "CHE-200.000.001")
+        assert "Company Structure" in result
+        assert "HQ AG" in result
+        assert "Head office" in result
+        assert "Marktgasse 10, 3011 Bern" in result
+
+    async def test_fallback_to_seat_without_ehraid(self):
+        branches = (
+            CompanyRef(
+                name="Branch Bern",
+                uid="CHE-200.000.001",
+                legal_seat="Bern",
+                status="ACTIVE",
+                ehraid=0,
+            ),
+        )
+        parent = make_company(
+            name="HQ AG",
+            uid="CHE-100.000.001",
+            branch_offices=branches,
+        )
+        fake = FakeZefixClient(companies=[parent])
+        result = await handle_company_structure(fake, "CHE-100.000.001")
+        assert "Bern" in result
+        assert "Branch Bern" in result
+
+    async def test_no_structure_returns_message(self):
+        company = make_company(
+            name="Standalone GmbH", uid="CHE-100.000.001"
+        )
+        fake = FakeZefixClient(companies=[company])
+        result = await handle_company_structure(fake, "CHE-100.000.001")
+        assert "No parent or branch offices" in result
+
+    async def test_german_structure_labels(self):
+        branches = (
+            CompanyRef(
+                name="Filiale Bern",
+                uid="CHE-200.000.001",
+                legal_seat="Bern",
+                status="ACTIVE",
+                ehraid=0,
+            ),
+        )
+        parent = make_company(
+            name="HQ AG",
+            uid="CHE-100.000.001",
+            branch_offices=branches,
+            status="ACTIVE",
+        )
+        fake = FakeZefixClient(companies=[parent])
+        result = await handle_company_structure(
+            fake, "CHE-100.000.001", language="de"
+        )
+        assert "Firmenstruktur" in result
+        assert "Hauptsitz" in result
+        assert "aktiv" in result
+
+    async def test_not_found_returns_message(self):
+        fake = FakeZefixClient(companies=[])
+        result = await handle_company_structure(fake, "CHE-000.000.000")
+        assert "No company found" in result
+
+    async def test_connection_error_handled(self):
+        fake = FakeZefixClient(error=ZefixConnectionError("down"))
+        result = await handle_company_structure(fake, "CHE-123.456.789")
+        assert "Could not connect" in result
+
+    async def test_timeout_error_handled(self):
+        fake = FakeZefixClient(error=ZefixTimeoutError("slow"))
+        result = await handle_company_structure(fake, "CHE-123.456.789")
+        assert "timed out" in result
+
+    async def test_api_error_handled(self):
+        fake = FakeZefixClient(
+            error=ZefixAPIError("server error", status_code=500)
+        )
+        result = await handle_company_structure(fake, "CHE-123.456.789")
+        assert "500" in result

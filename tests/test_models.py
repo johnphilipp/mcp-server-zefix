@@ -1,7 +1,11 @@
 """Tests for domain models and pure functions."""
 
 from mcp_server_zefix.models import Address, CompanyRef, LegalForm, normalize_uid
-from mcp_server_zefix.server import _format_company_detail, _format_company_summary
+from mcp_server_zefix.server import (
+    _format_company_detail,
+    _format_company_summary,
+    _format_structure_table,
+)
 from tests.conftest import make_company
 
 
@@ -123,7 +127,7 @@ class TestFormatCompanyDetail:
         )
         result = _format_company_detail(company)
         assert "Sandoz SA" in result
-        assert "Absorbed" in result
+        assert "Has taken over" in result
 
     def test_branch_offices_capped_at_10(self):
         branches = tuple(
@@ -144,3 +148,115 @@ class TestFormatCompanyDetail:
         assert "Previous names" not in result
         assert "Absorbed" not in result
         assert "Branch" not in result
+
+    def test_head_offices_shown(self):
+        company = make_company(
+            head_offices=(
+                CompanyRef(
+                    name="Parent AG", uid="CHE-100.000.001", legal_seat="Zurich"
+                ),
+            ),
+        )
+        result = _format_company_detail(company)
+        assert "Head office" in result
+        assert "Parent AG" in result
+        assert "CHE-100.000.001" in result
+
+    def test_german_labels(self):
+        company = make_company(status="ACTIVE")
+        result = _format_company_detail(company, language="de")
+        assert "aktiv" in result
+        assert "Rechtsform" in result
+        assert "Sitz" in result
+        assert "Adresse" in result
+        assert "Zweck" in result
+
+
+class TestFormatStructureTable:
+    def test_table_header_present(self):
+        head = make_company(name="HQ AG", uid="CHE-100.000.001")
+        result = _format_structure_table(head, (), language="en")
+        assert "| # |" in result
+        assert "| Role |" in result
+
+    def test_head_office_row_has_full_address(self):
+        head = make_company(
+            name="HQ AG",
+            uid="CHE-100.000.001",
+            address=Address(street="Bahnhofstrasse 1", zip_code="8001", city="Zurich"),
+        )
+        result = _format_structure_table(head, (), language="en")
+        assert "Bahnhofstrasse 1, 8001 Zurich" in result
+        assert "Head office" in result
+
+    def test_branch_rows_show_seat(self):
+        head = make_company(name="HQ AG", uid="CHE-100.000.001")
+        branches = (
+            CompanyRef(
+                name="Branch Bern",
+                uid="CHE-200.000.001",
+                legal_seat="Bern",
+                status="ACTIVE",
+            ),
+            CompanyRef(
+                name="Branch Basel",
+                uid="CHE-200.000.002",
+                legal_seat="Basel",
+                status="ACTIVE",
+            ),
+        )
+        result = _format_structure_table(head, branches, language="en")
+        assert "Branch Bern" in result
+        assert "Bern" in result
+        assert "Branch Basel" in result
+        assert "Basel" in result
+
+    def test_capped_notice_shown(self):
+        head = make_company(name="HQ AG", uid="CHE-100.000.001")
+        branches: list[CompanyRef] = [
+            CompanyRef(name=f"Branch {i}", uid=f"CHE-300.000.{i:03d}", legal_seat="X")
+            for i in range(3)
+        ]
+        result = _format_structure_table(
+            head, branches, capped=True, language="en"
+        )
+        assert "Full addresses shown for the first" in result
+        assert "registered seat only" in result
+
+    def test_no_capped_notice_when_not_capped(self):
+        head = make_company(name="HQ AG", uid="CHE-100.000.001")
+        result = _format_structure_table(head, [], capped=False, language="en")
+        assert "registered seat only" not in result
+
+    def test_row_count_matches_branches(self):
+        head = make_company(name="HQ AG", uid="CHE-100.000.001")
+        branches = tuple(
+            CompanyRef(name=f"Branch {i}", uid=f"CHE-300.000.{i:03d}", legal_seat="X")
+            for i in range(5)
+        )
+        result = _format_structure_table(head, branches, language="en")
+        data_rows = [
+            line
+            for line in result.split("\n")
+            if line.startswith("| ") and line[2].isdigit()
+        ]
+        assert len(data_rows) == 6
+
+    def test_german_labels(self):
+        head = make_company(
+            name="HQ AG", uid="CHE-100.000.001", status="ACTIVE"
+        )
+        branches = [
+            CompanyRef(
+                name="Filiale Bern",
+                uid="CHE-200.000.001",
+                legal_seat="Bern",
+                status="ACTIVE",
+            ),
+        ]
+        result = _format_structure_table(head, branches, language="de")
+        assert "Firmenstruktur" in result
+        assert "Hauptsitz" in result
+        assert "Zweigniederlassung" in result
+        assert "aktiv" in result
+        assert "Rolle" in result

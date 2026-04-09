@@ -4,8 +4,10 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 
+from mcp_server_zefix.i18n import label, status_label
 from mcp_server_zefix.models import (
     Company,
+    CompanyRef,
     ZefixAPIError,
     ZefixConnectionError,
     ZefixError,
@@ -27,9 +29,9 @@ mcp = FastMCP(
 _client: AbstractZefixClient = HttpZefixClient()
 
 
-def _format_company_summary(company: Company) -> str:
+def _format_company_summary(company: Company, language: str = "en") -> str:
     """Format a Company value object into a concise one-line Markdown summary."""
-    parts = [f"**{company.name}**", f"UID: {company.uid}"]
+    parts = [f"**{company.name}**", f"{label('uid_label', language)}: {company.uid}"]
     if company.legal_form:
         parts.append(company.legal_form.name)
     location = company.legal_seat
@@ -38,65 +40,83 @@ def _format_company_summary(company: Company) -> str:
     if location.strip():
         parts.append(location)
     if company.status:
-        parts.append(f"[{company.status}]")
+        parts.append(f"[{status_label(company.status, language)}]")
     return " — ".join(parts)
 
 
-def _format_company_detail(company: Company) -> str:
+def _format_company_detail(company: Company, language: str = "en") -> str:
     """Format a Company value object into detailed Markdown."""
+    L = language  # noqa: N806
+    status_display = status_label(company.status, L) if company.status else "N/A"
     lines = [
         f"# {company.name}",
         "",
-        f"**UID:** {company.uid}",
-        f"**CH-ID:** {company.chid or 'N/A'}",
-        f"**Status:** {company.status or 'N/A'}",
-        f"**Legal form:** {company.legal_form.name if company.legal_form else 'N/A'}",
-        f"**Registered office:** {company.legal_seat or 'N/A'}"
+        f"**{label('uid_label', L)}:** {company.uid}",
+        f"**{label('chid_label', L)}:** {company.chid or 'N/A'}",
+        f"**{label('status_label', L)}:** {status_display}",
+        f"**{label('legal_form', L)}:** "
+        f"{company.legal_form.name if company.legal_form else 'N/A'}",
+        f"**{label('seat', L)}:** {company.legal_seat or 'N/A'}"
         + (f" ({company.canton})" if company.canton else ""),
     ]
 
     if company.address and company.address.format():
-        lines.append(f"**Address:** {company.address.format()}")
+        lines.append(f"**{label('address', L)}:** {company.address.format()}")
     if company.purpose:
-        lines.append(f"**Purpose:** {company.purpose}")
+        lines.append(f"**{label('purpose', L)}:** {company.purpose}")
     if company.capital is not None:
-        lines.append(f"**Capital:** {company.capital_currency} {company.capital:,.0f}")
+        lines.append(
+            f"**{label('capital', L)}:** "
+            f"{company.capital_currency} {company.capital:,.0f}"
+        )
     if company.shab_date:
-        lines.append(f"**Last SHAB publication:** {company.shab_date}")
+        lines.append(f"**{label('shab_date', L)}:** {company.shab_date}")
     if company.delete_date:
-        lines.append(f"**Deletion date:** {company.delete_date}")
+        lines.append(f"**{label('delete_date', L)}:** {company.delete_date}")
     if company.cantonal_excerpt_url:
-        lines.append(f"**Cantonal register excerpt:** {company.cantonal_excerpt_url}")
+        lines.append(
+            f"**{label('cantonal_excerpt', L)}:** {company.cantonal_excerpt_url}"
+        )
 
     if company.audit_firms:
         firms = ", ".join(f"{f.name} ({f.uid})" for f in company.audit_firms)
-        lines.append(f"**Audit firm:** {firms}")
+        lines.append(f"**{label('audit_firms', L)}:** {firms}")
 
     if company.old_names:
         names = ", ".join(company.old_names)
-        lines.append(f"**Previous names:** {names}")
+        lines.append(f"**{label('old_names', L)}:** {names}")
 
     if company.taken_over:
         items = "\n".join(
             f"- {c.name} ({c.uid}), {c.legal_seat}" for c in company.taken_over
         )
-        lines.append(f"**Absorbed companies:**\n{items}")
+        lines.append(f"**{label('has_taken_over', L)}:**\n{items}")
 
     if company.taken_over_by:
         items = ", ".join(f"{c.name} ({c.uid})" for c in company.taken_over_by)
-        lines.append(f"**Acquired by:** {items}")
+        lines.append(f"**{label('taken_over_by', L)}:** {items}")
+
+    if company.head_offices:
+        items = ", ".join(
+            f"{h.name} ({h.uid}), {h.legal_seat}" for h in company.head_offices
+        )
+        lines.append(f"**{label('head_offices_label', L)}:** {items}")
 
     if company.branch_offices:
-        if len(company.branch_offices) <= 10:
+        n = len(company.branch_offices)
+        if n <= 10:
             items = "\n".join(
                 f"- {b.name}, {b.legal_seat}" for b in company.branch_offices
             )
         else:
             items = "\n".join(
-                f"- {b.name}, {b.legal_seat}" for b in company.branch_offices[:10]
+                f"- {b.name}, {b.legal_seat}"
+                for b in company.branch_offices[:10]
             )
-            items += f"\n- _... and {len(company.branch_offices) - 10} more_"
-        lines.append(f"**Branch offices ({len(company.branch_offices)}):**\n{items}")
+            items += f"\n- _... and {n - 10} more_"
+        lines.append(
+            f"**{label('branch_offices', L)} ({n}):**\n{items}"
+        )
 
     return "\n\n".join(lines)
 
@@ -139,11 +159,11 @@ async def handle_search(
         return f"An unexpected error occurred: {e}"
 
     if not results:
-        return f"No companies found matching '{name}'."
+        return f"{label('no_companies_found', language)} '{name}'."
 
-    lines = [f"Found {len(results)} result(s) for **{name}**:\n"]
+    lines = [f"Found {len(results)} {label('results_for', language)} **{name}**:\n"]
     for company in results:
-        lines.append(f"- {_format_company_summary(company)}")
+        lines.append(f"- {_format_company_summary(company, language)}")
 
     if len(results) >= max_results:
         lines.append(
@@ -176,7 +196,7 @@ async def handle_uid_lookup(
         normalized = normalize_uid(uid)
         return f"No company found with UID '{uid}' (searched as {normalized})."
 
-    return _format_company_detail(company)
+    return _format_company_detail(company, language)
 
 
 async def handle_chid_lookup(
@@ -200,12 +220,12 @@ async def handle_chid_lookup(
     if company is None:
         return f"No company found with CH-ID '{chid}'."
 
-    return _format_company_detail(company)
+    return _format_company_detail(company, language)
 
 
 async def handle_list_legal_forms(
     client: AbstractZefixClient,
-    language: str = "de",
+    language: str = "en",
 ) -> str:
     """List all legal forms and return formatted Markdown."""
     try:
@@ -223,7 +243,7 @@ async def handle_list_legal_forms(
     if not forms:
         return "No legal forms returned."
 
-    lines = ["# Swiss Legal Forms (Rechtsformen)\n"]
+    lines = [f"# {label('legal_forms_title', language)}\n"]
     for form in sorted(forms, key=lambda f: f.id):
         lines.append(f"- **{form.name}** (ID: {form.id})")
 
@@ -252,7 +272,7 @@ async def handle_get_publications(
         normalized = normalize_uid(uid)
         return f"No SHAB publications found for UID '{uid}' (searched as {normalized})."
 
-    lines = [f"# SHAB Publications ({len(publications)})\n"]
+    lines = [f"# {label('shab_publications', language)} ({len(publications)})\n"]
     for pub in publications:
         types_str = ", ".join(pub.mutation_types) if pub.mutation_types else "Update"
         lines.append(f"**{pub.date}** — {types_str}")
@@ -332,7 +352,7 @@ async def get_company_by_chid(chid: str, language: str = "en") -> str:
 
 
 @mcp.tool()
-async def list_legal_forms(language: str = "de") -> str:
+async def list_legal_forms(language: str = "en") -> str:
     """List all Swiss legal forms (Rechtsformen) recognized by Zefix.
 
     Useful for understanding legal form IDs returned in search results,
@@ -356,6 +376,175 @@ async def get_company_publications(uid: str, language: str = "en") -> str:
         language: Response language (de, fr, it, en).
     """
     return await handle_get_publications(_client, uid, language)
+
+
+_MAX_BRANCH_DETAIL_FETCHES = 50
+
+
+def _format_address(company: Company) -> str:
+    """Return formatted address, falling back to legal_seat."""
+    if company.address and company.address.format():
+        return company.address.format()
+    return company.legal_seat
+
+
+def _format_structure_table(
+    head: Company,
+    branches: list[Company | CompanyRef],
+    *,
+    capped: bool = False,
+    language: str = "en",
+    queried_uid: str = "",
+) -> str:
+    """Format a company structure as a Markdown table."""
+    L = language  # noqa: N806
+    queried_norm = normalize_uid(queried_uid) if queried_uid else ""
+    uid_h = label("uid_label", L)
+    lines = [
+        f"# {label('company_structure', L)}: {head.name}\n",
+        f"| # | {label('role', L)} | {label('name', L)} "
+        f"| {uid_h} | {label('address_seat', L)} "
+        f"| {label('status_label', L)} |",
+        "|---|------|------|-----|----------------|--------|",
+    ]
+
+    def _row(
+        num: str, role: str, name: str, uid: str, addr: str, st: str
+    ) -> str:
+        highlight = queried_norm and normalize_uid(uid) == queried_norm
+        if highlight:
+            return (
+                f"| **{num}** | **{role}** | **{name}** "
+                f"| **{uid}** | **{addr}** | **{st}** |"
+            )
+        return f"| {num} | {role} | {name} | {uid} | {addr} | {st} |"
+
+    head_status = status_label(head.status, L)
+    lines.append(
+        _row(
+            "1", label("head_office", L), head.name,
+            head.uid, _format_address(head), head_status,
+        )
+    )
+
+    branch_role = label("branch", L)
+    for i, branch in enumerate(branches, start=2):
+        if isinstance(branch, Company):
+            address = _format_address(branch)
+        else:
+            address = branch.legal_seat
+        st = status_label(branch.status, L)
+        lines.append(
+            _row(str(i), branch_role, branch.name, branch.uid, address, st)
+        )
+
+    if capped:
+        notice = label("cap_notice", L).format(n=_MAX_BRANCH_DETAIL_FETCHES)
+        lines.append(f"\n_{notice}_")
+
+    return "\n".join(lines)
+
+
+async def _fetch_branch_details(
+    client: AbstractZefixClient,
+    branch_refs: tuple[CompanyRef, ...],
+    language: str,
+) -> tuple[list[Company | CompanyRef], bool]:
+    """Fetch full detail for branches (up to cap), fall back to ref.
+
+    Returns (branches, capped) where capped is True when the cap was hit.
+    """
+    results: list[Company | CompanyRef] = []
+    fetched = 0
+    capped = False
+    for ref in branch_refs:
+        if fetched >= _MAX_BRANCH_DETAIL_FETCHES:
+            capped = True
+            results.append(ref)
+            continue
+        if not ref.ehraid:
+            results.append(ref)
+            continue
+        try:
+            company = await client.get_company_by_ehraid(
+                ref.ehraid, language=language
+            )
+        except ZefixError as e:
+            logger.debug("Failed to fetch detail for branch %s: %s", ref.uid, e)
+            company = None
+        results.append(company if company is not None else ref)
+        fetched += 1
+    return results, capped
+
+
+async def handle_company_structure(
+    client: AbstractZefixClient,
+    uid: str,
+    language: str = "en",
+) -> str:
+    """Look up a company's corporate structure (head office + branches)."""
+    try:
+        company = await client.get_company_by_uid(uid, language=language)
+    except ZefixConnectionError:
+        return "Could not connect to the Zefix API."
+    except ZefixTimeoutError:
+        return "Request timed out."
+    except ZefixAPIError as e:
+        return f"Zefix API error (HTTP {e.status_code})."
+    except ZefixError as e:
+        logger.exception("Unexpected Zefix error during structure lookup")
+        return f"An unexpected error occurred: {e}"
+
+    if company is None:
+        normalized = normalize_uid(uid)
+        return f"No company found with UID '{uid}' (searched as {normalized})."
+
+    head: Company = company
+    branch_refs: tuple[CompanyRef, ...] = ()
+
+    # If this is a branch, navigate to its head office
+    if company.head_offices:
+        parent_uid = company.head_offices[0].uid
+        try:
+            parent = await client.get_company_by_uid(
+                parent_uid, language=language
+            )
+        except (ZefixConnectionError, ZefixTimeoutError, ZefixAPIError, ZefixError):
+            parent = None
+        if parent is not None:
+            head = parent
+            branch_refs = parent.branch_offices
+    elif company.branch_offices:
+        branch_refs = company.branch_offices
+
+    if not branch_refs:
+        return label("no_structure", language)
+
+    branches, capped = await _fetch_branch_details(
+        client, branch_refs, language
+    )
+    return _format_structure_table(
+        head, branches, capped=capped, language=language, queried_uid=uid
+    )
+
+
+@mcp.tool()
+async def get_company_structure(uid: str, language: str = "en") -> str:
+    """Get the corporate structure (head office and branches) of a Swiss company.
+
+    Shows the parent company (Hauptniederlassung) and all its branch offices
+    (Zweigniederlassungen) in a table with full addresses. Works whether you
+    pass the UID of the head office or any branch — the full structure is
+    returned either way.
+
+    Fetches detail for up to 50 branches. May take a while for large
+    structures since each branch requires a separate API call.
+
+    Args:
+        uid: Company UID in any format (e.g. CHE-105.807.648 or CHE123456789).
+        language: Response language (de, fr, it, en).
+    """
+    return await handle_company_structure(_client, uid, language)
 
 
 def main() -> None:

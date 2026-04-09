@@ -29,6 +29,7 @@ def make_company(
     taken_over: tuple[CompanyRef, ...] = (),
     taken_over_by: tuple[CompanyRef, ...] = (),
     branch_offices: tuple[CompanyRef, ...] = (),
+    head_offices: tuple[CompanyRef, ...] = (),
     old_names: tuple[str, ...] = (),
 ) -> Company:
     """Create a Company with sensible defaults. Override any field as needed."""
@@ -54,6 +55,7 @@ def make_company(
         taken_over=taken_over,
         taken_over_by=taken_over_by,
         branch_offices=branch_offices,
+        head_offices=head_offices,
         old_names=old_names,
     )
 
@@ -87,11 +89,13 @@ class FakeZefixClient:
         legal_forms: list[LegalForm] | None = None,
         publications: list[ShabPublication] | None = None,
         error: ZefixError | None = None,
+        ehraid_map: dict[int, Company] | None = None,
     ) -> None:
         self.companies: list[Company] = list(companies or [])
         self.legal_forms: list[LegalForm] = list(legal_forms or [])
         self.publications: list[ShabPublication] = list(publications or [])
         self.error = error
+        self.ehraid_map: dict[int, Company] = dict(ehraid_map or {})
 
     async def search_companies(
         self,
@@ -144,10 +148,17 @@ class FakeZefixClient:
                 return company
         return None
 
-    async def list_legal_forms(self, *, language: str = "de") -> list[LegalForm]:
+    async def list_legal_forms(self, *, language: str = "en") -> list[LegalForm]:
         if self.error:
             raise self.error
         return list(self.legal_forms)
+
+    async def get_company_by_ehraid(
+        self, ehraid: int, *, language: str = "en"
+    ) -> Company | None:
+        if self.error:
+            raise self.error
+        return self.ehraid_map.get(ehraid)
 
     async def get_company_publications(
         self, uid: str, *, language: str = "en"
