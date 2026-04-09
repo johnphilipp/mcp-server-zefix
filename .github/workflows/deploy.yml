@@ -1,26 +1,26 @@
-name: Deploy to Hetzner
+name: Build and Push Docker Image
 
 on:
   release:
     types: [published]
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
         with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: root
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          script: |
-            set -e
-            if [ ! -d /opt/mcp-server-zefix ]; then
-              git clone https://github.com/johnphilipp/mcp-server-zefix.git /opt/mcp-server-zefix
-            fi
-            cd /opt/mcp-server-zefix
-            git fetch --all --tags
-            git checkout ${{ github.event.release.tag_name }}
-            echo "MCP_API_KEY=${{ secrets.MCP_API_KEY }}" > .env
-            docker compose -f docker-compose.prod.yml up -d --build
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
+            ghcr.io/${{ github.repository }}:latest

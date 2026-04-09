@@ -1,6 +1,6 @@
 services:
   zefix:
-    build: .
+    image: ghcr.io/johnphilipp/mcp-server-zefix:latest
     restart: unless-stopped
     environment:
       - MCP_API_KEY=${MCP_API_KEY}
