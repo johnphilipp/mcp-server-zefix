@@ -21,12 +21,16 @@ from mcp_server_zefix.zefix_client import AbstractZefixClient, HttpZefixClient
 
 logger = logging.getLogger(__name__)
 
+_host = "0.0.0.0" if os.getenv("MCP_API_KEY") else "127.0.0.1"
+
 mcp = FastMCP(
     "Zefix",
     instructions=(
         "Query the Swiss Zefix company register (Handelsregister). "
         "Search companies by name, look up by UID/CH-ID, and browse legal forms."
     ),
+    host=_host,
+    port=int(os.getenv("PORT", "8000")),
 )
 
 _client: AbstractZefixClient = HttpZefixClient()
