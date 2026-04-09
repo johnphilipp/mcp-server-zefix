@@ -373,7 +373,7 @@ class HttpZefixClient:
         max_entries: int = 20,
         offset: int = 0,
     ) -> list[Company]:
-        max_entries = max(1, min(max_entries, 100))
+        max_entries = max(1, min(max_entries, 500))
 
         if self._is_authenticated:
             body: dict[str, Any] = {
@@ -393,16 +393,18 @@ class HttpZefixClient:
             items = data if isinstance(data, list) else [data]
             return [_parse_company(item, language) for item in items]
 
-        # Unauthenticated: /firm/search.json ignores canton and legalForms
-        # filters, so we over-fetch and filter client-side.
+        # Unauthenticated: /firm/search.json ignores the offset parameter
+        # and canton/legalForms filters, so we over-fetch and handle
+        # filtering + pagination client-side.
         needs_client_filter = bool(canton or legal_form_ids)
-        api_limit = 100 if needs_client_filter else max_entries
+        fetch_limit = offset + max_entries
+        if needs_client_filter:
+            fetch_limit = max(fetch_limit, 500)
 
         firm_body: dict[str, Any] = {
             "activeOnly": active_only,
             "languageKey": language,
-            "maxEntries": api_limit,
-            "offset": offset,
+            "maxEntries": fetch_limit,
         }
         # API requires either name or legalForms in the body
         if name and name != "*":
@@ -428,7 +430,8 @@ class HttpZefixClient:
             if office_ids:
                 items = [i for i in items if i.get("registerOfficeId") in office_ids]
 
-        items = items[:max_entries]
+        # Client-side pagination (offset is ignored by the API)
+        items = items[offset : offset + max_entries]
         lf_map = await self._get_legal_forms_map(language)
         return [_parse_company(item, language, lf_map) for item in items]
 

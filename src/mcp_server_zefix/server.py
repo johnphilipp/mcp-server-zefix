@@ -303,7 +303,7 @@ async def search_companies(
         canton: Two-letter canton code (e.g. ZH, BE, GE). Empty for all.
         active_only: If true, only return currently active companies.
         language: Response language (de, fr, it, en).
-        max_results: Maximum number of results to return (1-100).
+        max_results: Maximum number of results to return (1-500).
         offset: Pagination offset for retrieving additional results.
         legal_form_ids: Comma-separated legal form IDs (e.g. "3,4").
     """
