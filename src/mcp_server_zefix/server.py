@@ -1,8 +1,11 @@
 """MCP server for the Swiss Zefix company register."""
 
 import logging
+import os
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from mcp_server_zefix.i18n import label, status_label
 from mcp_server_zefix.models import (
@@ -547,6 +550,45 @@ async def get_company_structure(uid: str, language: str = "en") -> str:
     return await handle_company_structure(_client, uid, language)
 
 
-def main() -> None:
+class _APIKeyMiddleware:
+    """ASGI middleware that checks Authorization: Bearer <key>."""
+
+    def __init__(self, app: object, api_key: str) -> None:
+        self.app = app
+        self.api_key = api_key
+
+    async def __call__(self, scope: dict, receive: object, send: object) -> None:
+        if scope["type"] == "http":
+            request = Request(scope)
+            auth = request.headers.get("authorization", "")
+            if auth != f"Bearer {self.api_key}":
+                response = JSONResponse(
+                    {"error": "unauthorized"}, status_code=401
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)  # type: ignore[misc]
+
+
+def main(transport: str = "stdio") -> None:
     """Entry point for the MCP server."""
-    mcp.run()
+    if transport == "stdio":
+        mcp.run()
+        return
+
+    import anyio
+    import uvicorn
+
+    app = mcp.streamable_http_app()
+    api_key = os.getenv("MCP_API_KEY", "")
+    if api_key:
+        app = _APIKeyMiddleware(app, api_key)
+
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        log_level="info",
+    )
+    server = uvicorn.Server(config)
+    anyio.run(server.serve)

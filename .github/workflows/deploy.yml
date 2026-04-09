@@ -1,0 +1,26 @@
+name: Deploy to Hetzner
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: root
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -e
+            if [ ! -d /opt/mcp-server-zefix ]; then
+              git clone https://github.com/johnphilipp/mcp-server-zefix.git /opt/mcp-server-zefix
+            fi
+            cd /opt/mcp-server-zefix
+            git fetch --all --tags
+            git checkout ${{ github.event.release.tag_name }}
+            echo "MCP_API_KEY=${{ secrets.MCP_API_KEY }}" > .env
+            docker compose -f docker-compose.prod.yml up -d --build
