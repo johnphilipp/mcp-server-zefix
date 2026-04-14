@@ -2,10 +2,13 @@ services:
   zefix:
     image: ghcr.io/johnphilipp/mcp-server-zefix:latest
     restart: unless-stopped
-    environment:
-      - MCP_API_KEY=${MCP_API_KEY}
     expose:
       - "8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "30"
 
   caddy:
     image: caddy:2-alpine

@@ -1,13 +1,13 @@
 """Zefix API client: abstract protocol (port) and HTTP implementation (adapter)."""
 
 import asyncio
-import logging
 import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
+import structlog
 
 from mcp_server_zefix.models import (
     Address,
@@ -23,7 +23,7 @@ from mcp_server_zefix.models import (
     normalize_uid,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 @runtime_checkable

@@ -1,11 +1,8 @@
 """MCP server for the Swiss Zefix company register."""
 
-import logging
-import os
-
+import structlog
 from mcp.server.fastmcp import FastMCP
-from starlette.requests import Request
-from starlette.responses import JSONResponse
+from mcp.types import ToolAnnotations
 
 from mcp_server_zefix.i18n import label, status_label
 from mcp_server_zefix.models import (
@@ -19,9 +16,7 @@ from mcp_server_zefix.models import (
 )
 from mcp_server_zefix.zefix_client import AbstractZefixClient, HttpZefixClient
 
-logger = logging.getLogger(__name__)
-
-_host = "0.0.0.0" if os.getenv("MCP_API_KEY") else "127.0.0.1"
+logger = structlog.get_logger()
 
 mcp = FastMCP(
     "Zefix",
@@ -29,9 +24,11 @@ mcp = FastMCP(
         "Query the Swiss Zefix company register (Handelsregister). "
         "Search companies by name, look up by UID/CH-ID, and browse legal forms."
     ),
-    host=_host,
-    port=int(os.getenv("PORT", "8000")),
+    host="0.0.0.0",
+    port=8000,
 )
+
+_TOOL_ANNOTATIONS = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
 
 _client: AbstractZefixClient = HttpZefixClient()
 
@@ -166,8 +163,13 @@ async def handle_search(
         return f"An unexpected error occurred: {e}"
 
     if not results:
+        logger.info("tool_call", tool="search_companies", name=name, results=0)
         return f"{label('no_companies_found', language)} '{name}'."
 
+    logger.info(
+        "tool_call", tool="search_companies",
+        name=name, canton=canton, results=len(results),
+    )
     lines = [f"Found {len(results)} {label('results_for', language)} **{name}**:\n"]
     for company in results:
         lines.append(f"- {_format_company_summary(company, language)}")
@@ -200,9 +202,11 @@ async def handle_uid_lookup(
         return f"An unexpected error occurred: {e}"
 
     if company is None:
+        logger.info("tool_call", tool="get_company_by_uid", uid=uid, found=False)
         normalized = normalize_uid(uid)
         return f"No company found with UID '{uid}' (searched as {normalized})."
 
+    logger.info("tool_call", tool="get_company_by_uid", uid=uid, found=True)
     return _format_company_detail(company, language)
 
 
@@ -225,8 +229,10 @@ async def handle_chid_lookup(
         return f"An unexpected error occurred: {e}"
 
     if company is None:
+        logger.info("tool_call", tool="get_company_by_chid", chid=chid, found=False)
         return f"No company found with CH-ID '{chid}'."
 
+    logger.info("tool_call", tool="get_company_by_chid", chid=chid, found=True)
     return _format_company_detail(company, language)
 
 
@@ -250,6 +256,7 @@ async def handle_list_legal_forms(
     if not forms:
         return "No legal forms returned."
 
+    logger.info("tool_call", tool="list_legal_forms", results=len(forms))
     lines = [f"# {label('legal_forms_title', language)}\n"]
     for form in sorted(forms, key=lambda f: f.id):
         lines.append(f"- **{form.name}** (ID: {form.id})")
@@ -276,9 +283,14 @@ async def handle_get_publications(
         return f"An unexpected error occurred: {e}"
 
     if not publications:
+        logger.info("tool_call", tool="get_company_publications", uid=uid, results=0)
         normalized = normalize_uid(uid)
         return f"No SHAB publications found for UID '{uid}' (searched as {normalized})."
 
+    logger.info(
+        "tool_call", tool="get_company_publications",
+        uid=uid, results=len(publications),
+    )
     lines = [f"# {label('shab_publications', language)} ({len(publications)})\n"]
     for pub in publications:
         types_str = ", ".join(pub.mutation_types) if pub.mutation_types else "Update"
@@ -290,7 +302,7 @@ async def handle_get_publications(
     return "\n".join(lines)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def search_companies(
     name: str,
     canton: str = "",
@@ -329,7 +341,7 @@ async def search_companies(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def get_company_by_uid(uid: str, language: str = "en") -> str:
     """Get detailed information about a Swiss company by its UID number.
 
@@ -344,7 +356,7 @@ async def get_company_by_uid(uid: str, language: str = "en") -> str:
     return await handle_uid_lookup(_client, uid, language)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def get_company_by_chid(chid: str, language: str = "en") -> str:
     """Get detailed information about a Swiss company by its CH-ID.
 
@@ -358,7 +370,7 @@ async def get_company_by_chid(chid: str, language: str = "en") -> str:
     return await handle_chid_lookup(_client, chid, language)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def list_legal_forms(language: str = "en") -> str:
     """List all Swiss legal forms (Rechtsformen) recognized by Zefix.
 
@@ -371,7 +383,7 @@ async def list_legal_forms(language: str = "en") -> str:
     return await handle_list_legal_forms(_client, language)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def get_company_publications(uid: str, language: str = "en") -> str:
     """Get SHAB publications (Swiss Official Gazette) for a company.
 
@@ -525,8 +537,13 @@ async def handle_company_structure(
         branch_refs = company.branch_offices
 
     if not branch_refs:
+        logger.info("tool_call", tool="get_company_structure", uid=uid, branches=0)
         return label("no_structure", language)
 
+    logger.info(
+        "tool_call", tool="get_company_structure",
+        uid=uid, branches=len(branch_refs),
+    )
     branches, capped = await _fetch_branch_details(
         client, branch_refs, language
     )
@@ -535,7 +552,7 @@ async def handle_company_structure(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def get_company_structure(uid: str, language: str = "en") -> str:
     """Get the corporate structure (head office and branches) of a Swiss company.
 
@@ -554,45 +571,6 @@ async def get_company_structure(uid: str, language: str = "en") -> str:
     return await handle_company_structure(_client, uid, language)
 
 
-class _APIKeyMiddleware:
-    """ASGI middleware that checks Authorization: Bearer <key>."""
-
-    def __init__(self, app: object, api_key: str) -> None:
-        self.app = app
-        self.api_key = api_key
-
-    async def __call__(self, scope: dict, receive: object, send: object) -> None:
-        if scope["type"] == "http":
-            request = Request(scope)
-            auth = request.headers.get("authorization", "")
-            if auth != f"Bearer {self.api_key}":
-                response = JSONResponse(
-                    {"error": "unauthorized"}, status_code=401
-                )
-                await response(scope, receive, send)
-                return
-        await self.app(scope, receive, send)  # type: ignore[misc]
-
-
 def main(transport: str = "stdio") -> None:
     """Entry point for the MCP server."""
-    if transport == "stdio":
-        mcp.run()
-        return
-
-    import anyio
-    import uvicorn
-
-    app = mcp.streamable_http_app()
-    api_key = os.getenv("MCP_API_KEY", "")
-    if api_key:
-        app = _APIKeyMiddleware(app, api_key)
-
-    config = uvicorn.Config(
-        app,
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "8000")),
-        log_level="info",
-    )
-    server = uvicorn.Server(config)
-    anyio.run(server.serve)
+    mcp.run(transport=transport)
