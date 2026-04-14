@@ -25,23 +25,20 @@ An [MCP](https://modelcontextprotocol.io/) server that connects Claude to [Zefix
 
 ### Hosted (no installation)
 
-Connect directly -- works in any MCP-compatible client.
+Connect directly -- no API key, no credentials, just the URL.
 
-**Claude Code:**
-
-```bash
-claude mcp add --transport http zefix https://mcp-server-zefix.contextfor.ai/mcp \
-  --header "Authorization: Bearer <your-api-key>"
-```
-
-**Claude Desktop:**
+**Claude.ai:**
 
 Settings > Customize > Connectors > Add custom connector:
 - URL: `https://mcp-server-zefix.contextfor.ai/mcp`
 
-Request an API key at [zefix@contextfor.ai](mailto:zefix@contextfor.ai).
+**Claude Code:**
 
-### Local (self-hosted)
+```bash
+claude mcp add --transport http zefix https://mcp-server-zefix.contextfor.ai/mcp
+```
+
+### Local
 
 ```bash
 claude mcp add zefix -- uvx mcp-server-zefix
@@ -59,8 +56,6 @@ Or add to your Claude Desktop config (`~/Library/Application Support/Claude/clau
   }
 }
 ```
-
-No API key or credentials needed for local usage.
 
 ## Tools
 
@@ -141,7 +136,7 @@ Follows [Architecture Patterns with Python](https://www.cosmicpython.com/) (Perc
 
 ## Self-hosting
 
-The server supports remote deployment via Streamable HTTP transport. See `Dockerfile`, `docker-compose.prod.yml`, and `Caddyfile` for a Docker + Caddy setup with auto-HTTPS and API key authentication.
+The server supports remote deployment via Streamable HTTP transport. See `Dockerfile`, `docker-compose.prod.yml`, and `Caddyfile` for a Docker + Caddy setup with auto-HTTPS.
 
 ## License
 
